@@ -1,3 +1,18 @@
+//-----------------------------------------------------------------------------
+// Filename: VP8EncoderUnitTest.cs
+//
+// Description: Unit tests for VP8 encoder architecture and interfaces.
+//
+// Author(s):
+// GitHub Copilot
+//
+// History:
+// 02 Feb 2026  GitHub Copilot  Created.
+//
+// License: 
+// BSD 3-Clause "New" or "Revised" License, see included LICENSE.md file.
+//-----------------------------------------------------------------------------
+
 using Xunit;
 using Vpx.Net;
 using System;

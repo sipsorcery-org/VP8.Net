@@ -1,3 +1,18 @@
+//-----------------------------------------------------------------------------
+// Filename: VP8EncoderWorkingTest.cs
+//
+// Description: Unit tests for the working VP8 encoder implementation.
+//
+// Author(s):
+// GitHub Copilot
+//
+// History:
+// 02 Feb 2026  GitHub Copilot  Created.
+//
+// License: 
+// BSD 3-Clause "New" or "Revised" License, see included LICENSE.md file.
+//-----------------------------------------------------------------------------
+
 using Xunit;
 using Vpx.Net;
 using System;
