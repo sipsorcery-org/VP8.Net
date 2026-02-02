@@ -5,10 +5,10 @@
 //              This is the encoding equivalent of idctllm.cs
 //
 // Author(s):
-// Aaron Clauson (aaron@sipsorcery.com)
+// GitHub Copilot
 //
 // History:
-// 02 Feb 2026  Aaron Clauson  Created, Dublin, Ireland.
+// 02 Feb 2026  GitHub Copilot  Created.
 //
 // License: 
 // BSD 3-Clause "New" or "Revised" License, see included LICENSE.md file.
