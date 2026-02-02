@@ -251,32 +251,99 @@ namespace Vpx.Net
             // Simple DC prediction: use 128 as predicted value (middle gray)
             byte dcPred = 128;
             
-            // Process Y blocks (16 4x4 blocks)
+            // For 16x16 prediction modes (like DC_PRED), we need to handle Y2 block
+            // 1. Process all 16 Y blocks and collect their DC coefficients
+            // 2. Apply WHT to DC coefficients -> Y2 block
+            // 3. Encode Y2 block first (plane_type = 1)
+            // 4. Encode Y blocks without DC (plane_type = 0, with hasY2 = true)
+            // 5. Encode U and V blocks normally (plane_type = 2)
+            
+            short[] dcCoeffs = new short[16];
+            short[][] yBlocks = new short[16][];
+            
+            // Step 1: Process all Y blocks and extract DC coefficients
+            int blockIdx = 0;
             for (int by = 0; by < 4; by++)
             {
                 for (int bx = 0; bx < 4; bx++)
                 {
-                    Encode4x4Block(ref bc, yPlane, mb_y + by * 4, mb_x + bx * 4, yStride, dcPred, 0);
+                    yBlocks[blockIdx] = new short[16];
+                    ProcessYBlock(yPlane, mb_y + by * 4, mb_x + bx * 4, yStride, dcPred, yBlocks[blockIdx], out dcCoeffs[blockIdx]);
+                    blockIdx++;
                 }
             }
             
-            // Process U blocks (4 4x4 blocks)
+            // Step 2: Apply Walsh-Hadamard transform to DC coefficients
+            short[] y2Coeffs = new short[16];
+            short[] y2Quant = new short[16];
+            fdctllm.vp8_short_walsh4x4(dcCoeffs, y2Coeffs, 4);
+            
+            // Step 3: Quantize and encode Y2 block (plane_type = 1)
+            QuantizeBlock(y2Coeffs, y2Quant, _quantizer, true); // true = is Y2 block
+            TokenizeAndEncode(ref bc, y2Quant, 1); // plane_type = 1 for Y2
+            
+            // Step 4: Encode Y blocks (AC only, DC already in Y2)
+            for (int i = 0; i < 16; i++)
+            {
+                TokenizeAndEncode(ref bc, yBlocks[i], 0); // plane_type = 0 for Y
+            }
+            
+            // Step 5: Process and encode U blocks (4 4x4 blocks)
             for (int by = 0; by < 2; by++)
             {
                 for (int bx = 0; bx < 2; bx++)
                 {
-                    Encode4x4Block(ref bc, uPlane, mb_uv_y + by * 4, mb_uv_x + bx * 4, uvStride, dcPred, 2);
+                    Encode4x4Block(ref bc, uPlane, mb_uv_y + by * 4, mb_uv_x + bx * 4, uvStride, dcPred, 3);
                 }
             }
             
-            // Process V blocks (4 4x4 blocks)
+            // Step 6: Process and encode V blocks (4 4x4 blocks)
             for (int by = 0; by < 2; by++)
             {
                 for (int bx = 0; bx < 2; bx++)
                 {
-                    Encode4x4Block(ref bc, vPlane, mb_uv_y + by * 4, mb_uv_x + bx * 4, uvStride, dcPred, 2);
+                    Encode4x4Block(ref bc, vPlane, mb_uv_y + by * 4, mb_uv_x + bx * 4, uvStride, dcPred, 3);
                 }
             }
+        }
+        
+        private void ProcessYBlock(byte* plane, int y, int x, int stride, byte pred, short[] quantized, out short dcCoeff)
+        {
+            // Get block data and compute residual
+            short[] residual = new short[16];
+            short[] dctCoeffs = new short[16];
+            
+            for (int i = 0; i < 4; i++)
+            {
+                for (int j = 0; j < 4; j++)
+                {
+                    int py = y + i;
+                    int px = x + j;
+                    
+                    // Clamp to frame bounds
+                    if (py >= 0 && py < _height && px >= 0 && px < _width)
+                    {
+                        byte pixel = plane[py * stride + px];
+                        residual[i * 4 + j] = (short)(pixel - pred);
+                    }
+                    else
+                    {
+                        residual[i * 4 + j] = 0;
+                    }
+                }
+            }
+            
+            // DCT transform
+            fdctllm.vp8_short_fdct4x4(residual, dctCoeffs, 4);
+            
+            // Quantize
+            QuantizeBlock(dctCoeffs, quantized, _quantizer, false);
+            
+            // Extract and store DC coefficient
+            dcCoeff = quantized[0];
+            
+            // Clear DC coefficient in the Y block (it will be in Y2)
+            quantized[0] = 0;
         }
         
         private void Encode4x4Block(ref BOOL_CODER bc, byte* plane, int y, int x, int stride, byte pred, int plane_type)
@@ -316,21 +383,49 @@ namespace Vpx.Net
             TokenizeAndEncode(ref bc, qCoeffs, plane_type);
         }
         
-        private void QuantizeBlock(short[] dctCoeffs, short[] qCoeffs, int q_index)
+        private void QuantizeBlock(short[] dctCoeffs, short[] qCoeffs, int q_index, bool isY2 = false)
         {
             // Simple quantization using VP8 quantization tables
-            int dc_quant = quant_common.vp8_dc_quant(q_index, 0);
-            int ac_quant = quant_common.vp8_ac_yquant(q_index);
+            int dc_quant, ac_quant;
+            
+            if (isY2)
+            {
+                // Y2 block uses different quantizers
+                dc_quant = quant_common.vp8_dc2quant(q_index, 0);
+                ac_quant = quant_common.vp8_ac2quant(q_index, 0);
+            }
+            else
+            {
+                // Y, U, V blocks use standard quantizers
+                dc_quant = quant_common.vp8_dc_quant(q_index, 0);
+                ac_quant = quant_common.vp8_ac_yquant(q_index);
+            }
             
             // DC coefficient
-            qCoeffs[0] = (short)((dctCoeffs[0] + (dc_quant >> 1)) / dc_quant);
+            if (dctCoeffs[0] != 0)
+            {
+                int sign = dctCoeffs[0] < 0 ? -1 : 1;
+                int abs_val = Math.Abs(dctCoeffs[0]);
+                qCoeffs[0] = (short)(sign * ((abs_val + (dc_quant >> 1)) / dc_quant));
+            }
+            else
+            {
+                qCoeffs[0] = 0;
+            }
             
             // AC coefficients
             for (int i = 1; i < 16; i++)
             {
-                int sign = dctCoeffs[i] < 0 ? -1 : 1;
-                int abs_val = Math.Abs(dctCoeffs[i]);
-                qCoeffs[i] = (short)(sign * ((abs_val + (ac_quant >> 1)) / ac_quant));
+                if (dctCoeffs[i] != 0)
+                {
+                    int sign = dctCoeffs[i] < 0 ? -1 : 1;
+                    int abs_val = Math.Abs(dctCoeffs[i]);
+                    qCoeffs[i] = (short)(sign * ((abs_val + (ac_quant >> 1)) / ac_quant));
+                }
+                else
+                {
+                    qCoeffs[i] = 0;
+                }
             }
         }
         
