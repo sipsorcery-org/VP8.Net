@@ -130,9 +130,9 @@ namespace Vpx.Net
                 output[4] = 0x01;
                 output[5] = 0x2a;
                 
-                // Width and height (14 bits each)
-                int w = _width;
-                int h = _height;
+                // Width and height (14 bits each) - encoded as (dimension - 1)
+                int w = _width - 1;
+                int h = _height - 1;
                 output[6] = (byte)(w & 0xFF);
                 output[7] = (byte)((w >> 8) & 0x3F);
                 output[8] = (byte)(h & 0xFF);
@@ -218,16 +218,25 @@ namespace Vpx.Net
         
         private void EncodeMacroblockMode(ref BOOL_CODER bc, MB_PREDICTION_MODE mode)
         {
-            // For keyframes, encode Y mode
-            // DC_PRED is encoded as tree value 0
-            // Using keyframe probabilities from vp8_kf_ymode_prob (145, 156, 163, 128 for the tree nodes)
+            // For keyframes, encode Y mode using the keyframe tree
+            // vp8_kf_ymode_tree structure:
+            //   Node 0: -B_PRED (left=0), 2 (right=1)
+            //   Node 2: 4 (left=0), 6 (right=1)
+            //   Node 4: -DC_PRED (left=0), -V_PRED (right=1)
+            //   Node 6: -H_PRED (left=0), -TM_PRED (right=1)
+            // Probabilities: { 145, 156, 163, 128 }
             
-            // Tree encoding for DC_PRED: prob[0] = 145, value = 1 (take left branch)
-            boolhuff.vp8_encode_bool(ref bc, 1, 145);
+            // For DC_PRED: right, left, left = bits 1, 0, 0
+            boolhuff.vp8_encode_bool(ref bc, 1, 145);  // Node 0: take right to node 2
+            boolhuff.vp8_encode_bool(ref bc, 0, 156);  // Node 2: take left to node 4
+            boolhuff.vp8_encode_bool(ref bc, 0, 163);  // Node 4: take left to DC_PRED
             
             // UV mode - also use DC_PRED
-            // Tree encoding: prob = 142, value = 1 for DC_PRED
-            boolhuff.vp8_encode_bool(ref bc, 1, 142);
+            // vp8_uv_mode_tree:
+            //   Node 0: -DC_PRED (left=0), 2 (right=1)
+            // For DC_PRED: just left = bit 0
+            // Probability for node 0 is 142
+            boolhuff.vp8_encode_bool(ref bc, 0, 142);  // Node 0: take left to DC_PRED
         }
         
         private void EncodeMacroblockData(ref BOOL_CODER bc, byte* yPlane, byte* uPlane, byte* vPlane,
