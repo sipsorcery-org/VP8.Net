@@ -36,7 +36,7 @@ namespace Vpx.Net
         }
 
         //private Vp8Codec _vp8Encoder;
-        //private vpx_codec_ctx_t _vp8Encoder;  // Encoder not fully implemented yet
+        private VP8Encoder _vp8Encoder;
         private vpx_codec_ctx_t _vp8Decoder;
         private bool _forceKeyFrame = false;
         private Object _decoderLock = new object();
@@ -53,11 +53,24 @@ namespace Vpx.Net
 
         public byte[] EncodeVideo(int width, int height, byte[] sample, VideoPixelFormatsEnum pixelFormat, VideoCodecsEnum codec)
         {
-            // Note: Encoder implementation is a work in progress
-            // The basic structure is in place but full encoding functionality
-            // requires additional development work
-            
-            throw new NotImplementedException("VP8 encoder is under development. The encoder architecture and interfaces have been defined but full encoding functionality is not yet complete.");
+            lock (_encoderLock)
+            {
+                if (_vp8Encoder == null)
+                {
+                    _vp8Encoder = new VP8Encoder(width, height);
+                    _vp8Encoder.SetQuantizer(10);  // Default quality
+                }
+
+                var i420Buffer = PixelConverter.ToI420(width, height, sample, pixelFormat);
+                var encodedBuffer = _vp8Encoder.EncodeFrame(i420Buffer, _forceKeyFrame);
+
+                if (_forceKeyFrame)
+                {
+                    _forceKeyFrame = false;
+                }
+
+                return encodedBuffer;
+            }
         }
 
         public unsafe IEnumerable<VideoSample> DecodeVideo(byte[] frame, VideoPixelFormatsEnum pixelFormat, VideoCodecsEnum codec)
