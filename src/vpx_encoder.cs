@@ -17,6 +17,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using vpx_codec_flags_t = System.Int64;
 
 namespace Vpx.Net
 {
@@ -558,5 +559,123 @@ namespace Vpx.Net
 
     public class vpx_encoder
     {
+        /// <summary>
+        /// Initialize an encoder instance.
+        /// </summary>
+        public static vpx_codec_err_t vpx_codec_enc_init_ver(vpx_codec_ctx_t ctx, 
+            vpx_codec_iface_t iface, vpx_codec_enc_cfg_t cfg, vpx_codec_flags_t flags)
+        {
+            if (ctx == null || iface == null)
+            {
+                return vpx_codec_err_t.VPX_CODEC_INVALID_PARAM;
+            }
+            
+            ctx.iface = iface;
+            ctx.name = iface.name;
+            ctx.enc_cfg = cfg;
+            ctx.init_flags = flags;
+            
+            if (iface.init != null)
+            {
+                return iface.init(ctx, cfg);
+            }
+            
+            return vpx_codec_err_t.VPX_CODEC_OK;
+        }
+        
+        /// <summary>
+        /// Encode a frame.
+        /// </summary>
+        public static unsafe vpx_codec_err_t vpx_codec_encode(vpx_codec_ctx_t ctx, 
+            vpx_image_t img, long pts, uint duration, uint flags, uint deadline)
+        {
+            if (ctx == null)
+            {
+                return vpx_codec_err_t.VPX_CODEC_INVALID_PARAM;
+            }
+            
+            if (ctx.iface == null || ctx.iface.encode == null)
+            {
+                return vpx_codec_err_t.VPX_CODEC_ERROR;
+            }
+            
+            return ctx.iface.encode(ctx, img, pts, duration, flags);
+        }
+        
+        /// <summary>
+        /// Retrieve encoded data.
+        /// </summary>
+        public static vpx_codec_cx_pkt_t vpx_codec_get_cx_data(vpx_codec_ctx_t ctx, ref IntPtr iter)
+        {
+            if (ctx == null || ctx.encoded_frame_data == null || ctx.encoded_frame_size == 0)
+            {
+                return null;
+            }
+            
+            // Simple implementation: return the encoded frame once
+            if (iter == IntPtr.Zero)
+            {
+                unsafe
+                {
+                    vpx_codec_cx_pkt_t pkt = new vpx_codec_cx_pkt_t();
+                    fixed (byte* pData = ctx.encoded_frame_data)
+                    {
+                        pkt.data = pData;
+                        pkt.sz = (uint)ctx.encoded_frame_size;
+                        pkt.pts = ctx.encoded_frame_pts;
+                        pkt.flags = (uint)ctx.encoded_frame_flags;
+                        pkt.kind = 0;  // VPX_CODEC_CX_FRAME_PKT
+                    }
+                    
+                    iter = new IntPtr(1);  // Mark as consumed
+                    return pkt;
+                }
+            }
+            
+            return null;
+        }
+        
+        /// <summary>
+        /// Get default encoder configuration.
+        /// </summary>
+        public static vpx_codec_err_t vpx_codec_enc_config_default(vpx_codec_iface_t iface,
+            vpx_codec_enc_cfg_t cfg, uint usage)
+        {
+            if (iface == null || cfg == null)
+            {
+                return vpx_codec_err_t.VPX_CODEC_INVALID_PARAM;
+            }
+            
+            // Set default values
+            cfg.g_usage = usage;
+            cfg.g_threads = 1;
+            cfg.g_profile = 0;
+            cfg.g_w = 0;
+            cfg.g_h = 0;
+            cfg.g_bit_depth = vpx_bit_depth_t.VPX_BITS_8;
+            cfg.g_input_bit_depth = 8;
+            cfg.g_timebase = new vpx_rational_t { num = 1, den = 30 };
+            cfg.g_error_resilient = 0;
+            cfg.g_pass = vpx_enc_pass.VPX_RC_ONE_PASS;
+            cfg.g_lag_in_frames = 0;
+            
+            cfg.rc_dropframe_thresh = 0;
+            cfg.rc_resize_allowed = 0;
+            cfg.rc_end_usage = vpx_rc_mode.VPX_CBR;
+            cfg.rc_target_bitrate = 0;
+            cfg.rc_min_quantizer = 0;
+            cfg.rc_max_quantizer = 63;
+            cfg.rc_undershoot_pct = 100;
+            cfg.rc_overshoot_pct = 100;
+            cfg.rc_buf_sz = 6000;
+            cfg.rc_buf_initial_sz = 4000;
+            cfg.rc_buf_optimal_sz = 5000;
+            
+            cfg.kf_mode = vpx_kf_mode.VPX_KF_AUTO;
+            cfg.kf_min_dist = 0;
+            cfg.kf_max_dist = 128;
+            
+            return vpx_codec_err_t.VPX_CODEC_OK;
+        }
     }
 }

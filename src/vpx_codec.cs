@@ -79,6 +79,7 @@ using vpx_codec_caps_t = System.UInt64;
  */
 //typedef long vpx_codec_flags_t;
 using vpx_codec_flags_t = System.Int64;
+using vpx_codec_frame_flags_t = System.UInt32;
 
 /*!\brief Codec interface structure.
  *
@@ -225,6 +226,13 @@ namespace Vpx.Net
         public vpx_codec_enc_cfg_t enc_cfg;
         //public vpx_codec_priv_t priv; /**< Algorithm private storage */
         public vpx_codec_alg_priv_t priv;
+        
+        // Encoder-specific fields
+        public object encoder_state;            /**< Encoder instance (VP8_COMP) */
+        public byte[] encoded_frame_data;       /**< Encoded frame data */
+        public int encoded_frame_size;          /**< Encoded frame size */
+        public long encoded_frame_pts;          /**< Encoded frame PTS */
+        public vpx_codec_frame_flags_t encoded_frame_flags;  /**< Encoded frame flags */
     }
 
     public class vpx_codec
