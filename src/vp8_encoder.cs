@@ -202,6 +202,9 @@ namespace Vpx.Net
             byte* uPlane = inputData + ySize;
             byte* vPlane = inputData + ySize + uvSize;
             
+            // Write mb_no_coeff_skip flag (0 = don't use skip)
+            boolhuff.vp8_encode_bool(ref bc, 0, 128);
+            
             // FIRST PASS: Encode all macroblock modes
             for (int mb_row = 0; mb_row < _mb_rows; mb_row++)
             {
@@ -489,8 +492,7 @@ namespace Vpx.Net
                     // Encode sign
                     boolhuff.vp8_encode_bool(ref bc, coeff < 0 ? 1 : 0, 128);
                     
-                    // Now encode EOB
-                    boolhuff.vp8_encode_bool(ref bc, 1, coef_probs[plane_type, entropy.vp8_coef_bands[i + 1 < 16 ? i + 1 : 15], 1, 0]);
+                    // Last non-zero coefficient acts as EOB - we're done!
                     break;
                 }
                 
