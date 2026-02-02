@@ -31,8 +31,27 @@ namespace Vpx.Net
 {
     public static class entropy
     {
+        // Token constants for encoding/decoding coefficients
+        public const int ZERO_TOKEN = 0;          // 0         Extra Bits 0+0
+        public const int ONE_TOKEN = 1;           // 1         Extra Bits 0+1
+        public const int TWO_TOKEN = 2;           // 2         Extra Bits 0+1
+        public const int THREE_TOKEN = 3;         // 3         Extra Bits 0+1
+        public const int FOUR_TOKEN = 4;          // 4         Extra Bits 0+1
+        public const int DCT_VAL_CATEGORY1 = 5;   // 5-6       Extra Bits 1+1
+        public const int DCT_VAL_CATEGORY2 = 6;   // 7-10      Extra Bits 2+1
+        public const int DCT_VAL_CATEGORY3 = 7;   // 11-18     Extra Bits 3+1
+        public const int DCT_VAL_CATEGORY4 = 8;   // 19-34     Extra Bits 4+1
+        public const int DCT_VAL_CATEGORY5 = 9;   // 35-66     Extra Bits 5+1
+        public const int DCT_VAL_CATEGORY6 = 10;  // 67+       Extra Bits 11+1
+        public const int DCT_EOB_TOKEN = 11;      // EOB       Extra Bits 0+0
+        
         public const int MAX_ENTROPY_TOKENS = 12;
         public const int ENTROPY_NODES = 11;
+        
+        // Coefficient band mapping (position to band)
+        public static readonly byte[] vp8_coef_bands = {
+            0, 1, 2, 3, 6, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7
+        };
 
         public static readonly byte[] vp8_norm = {
             0, 7, 6, 6, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,

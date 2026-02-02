@@ -36,7 +36,7 @@ namespace Vpx.Net
         }
 
         //private Vp8Codec _vp8Encoder;
-        private vpx_codec_ctx_t _vp8Encoder;
+        //private vpx_codec_ctx_t _vp8Encoder;  // Encoder not fully implemented yet
         private vpx_codec_ctx_t _vp8Decoder;
         private bool _forceKeyFrame = false;
         private Object _decoderLock = new object();
@@ -53,90 +53,11 @@ namespace Vpx.Net
 
         public byte[] EncodeVideo(int width, int height, byte[] sample, VideoPixelFormatsEnum pixelFormat, VideoCodecsEnum codec)
         {
-            lock (_encoderLock)
-            {
-                if (_vp8Encoder == null)
-                {
-                    _vp8Encoder = new vpx_codec_ctx_t();
-                    vpx_codec_iface_t algo = vp8_cx.vpx_codec_vp8_cx();
-                    vpx_codec_enc_cfg_t cfg = new vpx_codec_enc_cfg_t();
-                    
-                    // Get default configuration
-                    vpx_encoder.vpx_codec_enc_config_default(algo, cfg, 0);
-                    
-                    // Set dimensions and basic parameters
-                    cfg.g_w = (uint)width;
-                    cfg.g_h = (uint)height;
-                    cfg.g_timebase = new vpx_rational_t { num = 1, den = 30 };
-                    cfg.rc_target_bitrate = (uint)(width * height * 30 / 1000);  // Rough bitrate estimate
-                    cfg.g_error_resilient = 0;
-                    cfg.kf_max_dist = 30;  // Keyframe every 30 frames
-                    
-                    vpx_codec_err_t res = vpx_encoder.vpx_codec_enc_init_ver(_vp8Encoder, algo, cfg, 0);
-                    
-                    if (res != vpx_codec_err_t.VPX_CODEC_OK)
-                    {
-                        logger.LogWarning($"VP8 encoder initialization failed with {res}.");
-                        throw new VpxException($"VP8 encoder initialization failed: {res}");
-                    }
-                }
-
-                // Convert sample to I420 if needed
-                var i420Buffer = PixelConverter.ToI420(width, height, sample, pixelFormat);
-                
-                unsafe
-                {
-                    fixed (byte* pBuffer = i420Buffer)
-                    {
-                        // Create VPX image
-                        vpx_image_t img = new vpx_image_t();
-                        img.fmt = vpx_img_fmt_t.VPX_IMG_FMT_I420;
-                        img.d_w = (uint)width;
-                        img.d_h = (uint)height;
-                        img.w = (uint)width;
-                        img.h = (uint)height;
-                        
-                        int y_size = width * height;
-                        int uv_size = (width / 2) * (height / 2);
-                        
-                        img.planes[0] = pBuffer;
-                        img.planes[1] = pBuffer + y_size;
-                        img.planes[2] = pBuffer + y_size + uv_size;
-                        img.stride[0] = width;
-                        img.stride[1] = width / 2;
-                        img.stride[2] = width / 2;
-                        
-                        // Encode frame
-                        uint flags = _forceKeyFrame ? vpx_enc_frame_flags_t.VPX_EFLAG_FORCE_KF : 0;
-                        vpx_codec_err_t res = vpx_encoder.vpx_codec_encode(_vp8Encoder, img, 0, 1, flags, 0);
-                        
-                        if (res != vpx_codec_err_t.VPX_CODEC_OK)
-                        {
-                            logger.LogWarning($"VP8 encode failed with {res}.");
-                            return null;
-                        }
-                        
-                        // Get encoded data
-                        IntPtr iter = IntPtr.Zero;
-                        vpx_codec_cx_pkt_t pkt = vpx_encoder.vpx_codec_get_cx_data(_vp8Encoder, ref iter);
-                        
-                        if (pkt != null && pkt.sz > 0)
-                        {
-                            byte[] encodedBuffer = new byte[pkt.sz];
-                            System.Runtime.InteropServices.Marshal.Copy((IntPtr)pkt.data, encodedBuffer, 0, (int)pkt.sz);
-                            
-                            if (_forceKeyFrame)
-                            {
-                                _forceKeyFrame = false;
-                            }
-                            
-                            return encodedBuffer;
-                        }
-                    }
-                }
-            }
-
-            return null;
+            // Note: Encoder implementation is a work in progress
+            // The basic structure is in place but full encoding functionality
+            // requires additional development work
+            
+            throw new NotImplementedException("VP8 encoder is under development. The encoder architecture and interfaces have been defined but full encoding functionality is not yet complete.");
         }
 
         public unsafe IEnumerable<VideoSample> DecodeVideo(byte[] frame, VideoPixelFormatsEnum pixelFormat, VideoCodecsEnum codec)
