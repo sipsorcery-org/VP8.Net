@@ -202,13 +202,21 @@ namespace Vpx.Net
             byte* uPlane = inputData + ySize;
             byte* vPlane = inputData + ySize + uvSize;
             
+            // FIRST PASS: Encode all macroblock modes
             for (int mb_row = 0; mb_row < _mb_rows; mb_row++)
             {
                 for (int mb_col = 0; mb_col < _mb_cols; mb_col++)
                 {
                     // Encode macroblock mode (DC_PRED for all MBs)
                     EncodeMacroblockMode(ref bc, MB_PREDICTION_MODE.DC_PRED);
-                    
+                }
+            }
+            
+            // SECOND PASS: Encode all macroblock token data
+            for (int mb_row = 0; mb_row < _mb_rows; mb_row++)
+            {
+                for (int mb_col = 0; mb_col < _mb_cols; mb_col++)
+                {
                     // Encode macroblock data
                     EncodeMacroblockData(ref bc, yPlane, uPlane, vPlane, 
                                        mb_row, mb_col, yStride, uvStride);
