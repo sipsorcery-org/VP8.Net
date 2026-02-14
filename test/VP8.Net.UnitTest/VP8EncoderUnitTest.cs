@@ -106,6 +106,7 @@ namespace Vpx.Net.UnitTest
             Assert.True(encoded.Length > 0);
 
             logger.LogDebug($"Encoded {width}x{height} frame to {encoded.Length} bytes");
+            logger.LogDebug($"First 40 bytes (hex): {StrHelper.HexStr(encoded, Math.Min(40, encoded.Length))}");
 
             // Decode the encoded frame
             var decoded = codec.DecodeVideo(encoded, VideoPixelFormatsEnum.Bgr, VideoCodecsEnum.VP8).ToList();
