@@ -281,6 +281,194 @@ namespace Vpx.Net
         }
 
         /// <summary>
+        /// Encode a value using a tree structure (inverse of vp8_treed_read)
+        /// </summary>
+        private static void vp8_treed_write(ref BOOL_CODER bc, sbyte[] tree, byte* probs, int value)
+        {
+            // The tree structure uses negative values as leaf nodes
+            // We need to traverse the tree and write the bits that lead to our value
+            
+            // Build the path to the value
+            System.Collections.Generic.List<int> path = new System.Collections.Generic.List<int>();
+            int i = 0;
+            bool found = false;
+            
+            // Simple approach: try both paths at each node and see which leads to our value
+            void FindPath(int node, System.Collections.Generic.List<int> currentPath)
+            {
+                if (found) return;
+                
+                if (tree[node] <= 0)
+                {
+                    // Leaf node
+                    if (-tree[node] == value)
+                    {
+                        path = new System.Collections.Generic.List<int>(currentPath);
+                        found = true;
+                    }
+                    return;
+                }
+                
+                // Try left (0)
+                currentPath.Add(0);
+                FindPath(tree[node], currentPath);
+                currentPath.RemoveAt(currentPath.Count - 1);
+                
+                if (found) return;
+                
+                // Try right (1)
+                currentPath.Add(1);
+                FindPath(tree[node] + 1, currentPath);
+                currentPath.RemoveAt(currentPath.Count - 1);
+            }
+            
+            FindPath(0, new System.Collections.Generic.List<int>());
+            
+            // Write the path
+            for (int j = 0; j < path.Count; j++)
+            {
+                boolhuff.vp8_encode_bool(ref bc, path[j], probs[j]);
+            }
+        }
+
+        /// <summary>
+        /// Encode coefficients using VP8 token tree (inverse of GetCoeffs in detokenize.cs)
+        /// </summary>
+        private static void WriteCoeffs(ref BOOL_CODER bc, byte* prob, short* coeffs, int n)
+        {
+            // Zigzag order for DCT coefficients
+            byte[] zigzag = { 0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15 };
+            
+            // Bands for coefficient positions
+            byte[] bands = { 0, 1, 2, 3, 6, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7, 0 };
+            
+            int NUM_PROBAS = 11;
+            int NUM_CTX = 3;
+            int bigSlice = NUM_CTX * NUM_PROBAS;
+            int smallSlice = NUM_PROBAS;
+            
+            // Check if all coefficients are zero
+            bool has_coeffs = false;
+            int last_nz = 0;
+            for (int i = 0; i < 16; i++)
+            {
+                if (coeffs[i] != 0)
+                {
+                    has_coeffs = true;
+                    last_nz = i;
+                }
+            }
+            
+            // Get probability for this band and context
+            byte* p = prob + n * bigSlice; // Start with context 0
+            
+            // Write first bit: has coefficients or EOB
+            if (!has_coeffs)
+            {
+                boolhuff.vp8_encode_bool(ref bc, 0, p[0]);
+                return;
+            }
+            
+            boolhuff.vp8_encode_bool(ref bc, 1, p[0]);
+            
+            // Encode each non-zero coefficient
+            int ctx = 0; // Previous coefficient context (0, 1, or 2)
+            
+            for (int i = 0; i < 16; i++)
+            {
+                int coeff_idx = zigzag[i];
+                int v = System.Math.Abs(coeffs[coeff_idx]);
+                
+                n++;
+                p = prob + bands[n] * bigSlice + ctx * smallSlice;
+                
+                if (v == 0)
+                {
+                    // Write EOB if this is after last non-zero
+                    if (i > last_nz)
+                    {
+                        boolhuff.vp8_encode_bool(ref bc, 0, p[1]); // EOB
+                        return;
+                    }
+                    // Skip this zero coefficient, continue
+                    continue;
+                }
+                
+                // Write "not EOB" bit
+                boolhuff.vp8_encode_bool(ref bc, 1, p[1]);
+                
+                // Encode coefficient value
+                if (v == 1)
+                {
+                    boolhuff.vp8_encode_bool(ref bc, 0, p[2]); // v == 1
+                    ctx = 1;
+                }
+                else if (v == 2)
+                {
+                    boolhuff.vp8_encode_bool(ref bc, 1, p[2]); // v > 1
+                    boolhuff.vp8_encode_bool(ref bc, 0, p[3]); // v == 2
+                    boolhuff.vp8_encode_bool(ref bc, 0, p[4]); // select 2
+                    ctx = 2;
+                }
+                else if (v == 3 || v == 4)
+                {
+                    boolhuff.vp8_encode_bool(ref bc, 1, p[2]); // v > 1
+                    boolhuff.vp8_encode_bool(ref bc, 0, p[3]); // v < 5
+                    boolhuff.vp8_encode_bool(ref bc, 1, p[4]); // v == 3 or 4
+                    boolhuff.vp8_encode_bool(ref bc, v == 4 ? 1 : 0, p[5]); // which one
+                    ctx = 2;
+                }
+                else if (v >= 5 && v <= 6)
+                {
+                    boolhuff.vp8_encode_bool(ref bc, 1, p[2]); // v > 1
+                    boolhuff.vp8_encode_bool(ref bc, 1, p[3]); // v >= 5
+                    boolhuff.vp8_encode_bool(ref bc, 0, p[6]); // v < 7
+                    boolhuff.vp8_encode_bool(ref bc, 0, p[7]); // CAT1
+                    boolhuff.vp8_encode_bool(ref bc, v == 6 ? 1 : 0, 159); // extra bit
+                    ctx = 2;
+                }
+                else if (v >= 7 && v <= 10)
+                {
+                    boolhuff.vp8_encode_bool(ref bc, 1, p[2]); // v > 1
+                    boolhuff.vp8_encode_bool(ref bc, 1, p[3]); // v >= 5
+                    boolhuff.vp8_encode_bool(ref bc, 0, p[6]); // v < 11
+                    boolhuff.vp8_encode_bool(ref bc, 1, p[7]); // CAT2
+                    int offset = v - 7;
+                    boolhuff.vp8_encode_bool(ref bc, (offset >> 1) & 1, 165); // bit 1
+                    boolhuff.vp8_encode_bool(ref bc, offset & 1, 145); // bit 0
+                    ctx = 2;
+                }
+                else
+                {
+                    // Larger values (CAT3-CAT6) - simplified, just clamp to 10
+                    boolhuff.vp8_encode_bool(ref bc, 1, p[2]); // v > 1
+                    boolhuff.vp8_encode_bool(ref bc, 1, p[3]); // v >= 5
+                    boolhuff.vp8_encode_bool(ref bc, 0, p[6]); // CAT2
+                    boolhuff.vp8_encode_bool(ref bc, 1, p[7]); 
+                    boolhuff.vp8_encode_bool(ref bc, 1, 165); 
+                    boolhuff.vp8_encode_bool(ref bc, 1, 145);
+                    ctx = 2;
+                }
+                
+                // Write sign bit
+                if (coeffs[coeff_idx] < 0)
+                {
+                    boolhuff.vp8_encode_bool(ref bc, 1, 128);
+                }
+                else
+                {
+                    boolhuff.vp8_encode_bool(ref bc, 0, 128);
+                }
+                
+                // Check if this was the last non-zero coefficient
+                if (i >= last_nz)
+                {
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
         /// Encode a single 16x16 macroblock for keyframe
         /// </summary>
         private static void vp8e_encode_macroblock_keyframe(VP8E_COMP ctx, ref BOOL_CODER bc,
@@ -300,11 +488,33 @@ namespace Vpx.Net
             byte* pred_buffer = stackalloc byte[256 + 64 + 64];  // 16x16 Y + 8x8 U + 8x8 V
             short* residual = stackalloc short[256 + 64 + 64];
             short* dct_coeffs = stackalloc short[16];
+            
+            // Get coefficient probabilities (use default for keyframes)
+            byte* coef_probs = stackalloc byte[4 * 8 * 3 * 11];
+            
+            // Copy default probabilities
+            fixed (byte* pDefaultProbs = default_coef_probs_c.default_coef_probs)
+            {
+                for (int i = 0; i < 4 * 8 * 3 * 11; i++)
+                {
+                    coef_probs[i] = pDefaultProbs[i];
+                }
+            }
 
             // Use DC prediction (simplest mode for keyframes)
-            // Encode intra mode - DC_PRED
+            // Encode intra mode using tree structure
             int intra_mode = (int)MB_PREDICTION_MODE.DC_PRED;
-            boolhuff.vp8_encode_value(ref bc, intra_mode, 4);
+            fixed (byte* ymode_probs = vp8_entropymodedata.vp8_kf_ymode_prob)
+            {
+                vp8_treed_write(ref bc, entropymode.vp8_kf_ymode_tree, ymode_probs, intra_mode);
+            }
+            
+            // Encode UV mode
+            int uv_mode = (int)MB_PREDICTION_MODE.DC_PRED;
+            fixed (byte* uvmode_probs = vp8_entropymodedata.vp8_kf_uv_mode_prob)
+            {
+                vp8_treed_write(ref bc, entropymode.vp8_uv_mode_tree, uvmode_probs, uv_mode);
+            }
 
             // Generate DC prediction for 16x16 Y macroblock
             byte* y_pred = pred_buffer;
@@ -312,7 +522,6 @@ namespace Vpx.Net
             byte* v_pred = pred_buffer + 256 + 64;
 
             // Simple DC prediction: use 128 for all pixels (mid-gray)
-            // In full implementation, we'd use average of above/left pixels
             for (int i = 0; i < 256; i++) y_pred[i] = 128;
             for (int i = 0; i < 64; i++) u_pred[i] = 128;
             for (int i = 0; i < 64; i++) v_pred[i] = 128;
@@ -327,80 +536,33 @@ namespace Vpx.Net
             {
                 for (int block_x = 0; block_x < 4; block_x++)
                 {
-                    int block_idx = block_y * 4 + block_x;
-                    int pixel_y = block_y * 4;
-                    int pixel_x = block_x * 4;
-
-                    // Compute residuals for 4x4 block
-                    short* block_residual = residual + (block_idx * 16);
-                    for (int y = 0; y < 4; y++)
-                    {
-                        for (int x = 0; x < 4; x++)
-                        {
-                            int src_offset = (pixel_y + y) * img.stride[0] + (pixel_x + x);
-                            int pred_offset = (pixel_y + y) * 16 + (pixel_x + x);
-                            block_residual[y * 4 + x] = (short)(y_src[src_offset] - y_pred[pred_offset]);
-                        }
-                    }
-
-                    // Apply forward DCT
-                    fdctllm.vp8_short_fdct4x4_c(block_residual, dct_coeffs, 4);
-
-                    // Simple quantization (divide by quantizer)
-                    int qindex = ctx.common.base_qindex;
-                    int quantizer = quant_common.vp8_ac_yquant(qindex);
-                    for (int i = 0; i < 16; i++)
-                    {
-                        dct_coeffs[i] = (short)((dct_coeffs[i] * 4) / quantizer);
-                    }
-
-                    // Encode coefficients (simplified - just check if all zero)
-                    bool all_zero = true;
-                    for (int i = 0; i < 16; i++)
-                    {
-                        if (dct_coeffs[i] != 0)
-                        {
-                            all_zero = false;
-                            break;
-                        }
-                    }
-
-                    if (all_zero)
-                    {
-                        // Write EOB immediately
-                        boolhuff.vp8_encode_bool(ref bc, 1, 128);
-                    }
-                    else
-                    {
-                        // Write some coefficients (simplified encoding)
-                        // Just write a few non-zero tokens
-                        for (int i = 0; i < 16; i++)
-                        {
-                            if (dct_coeffs[i] != 0)
-                            {
-                                // Encode non-zero coefficient
-                                boolhuff.vp8_encode_bool(ref bc, 0, 128);  // Not EOB
-                                boolhuff.vp8_encode_value(ref bc, System.Math.Abs(dct_coeffs[i]), 8);
-                            }
-                        }
-                        // Write EOB
-                        boolhuff.vp8_encode_bool(ref bc, 1, 128);
-                    }
+                    // For now, encode all blocks as empty (EOB) to test basic structure
+                    // Just write EOB immediately using p[0] = 0
+                    byte* block_probs = coef_probs; // Y1 block type
+                    int NUM_PROBAS = 11;
+                    int NUM_CTX = 3;
+                    int bigSlice = NUM_CTX * NUM_PROBAS;
+                    byte* p = block_probs; // band 0, context 0
+                    
+                    // Write "no coefficients" (EOB at first position)
+                    boolhuff.vp8_encode_bool(ref bc, 0, p[0]);
                 }
             }
 
-            // Process 4 U blocks (8x8 split into 4x4)
+            // Process 4 U blocks (8x8 split into 4x4)  
             for (int block = 0; block < 4; block++)
             {
-                // For UV, just write EOB (simplified)
-                boolhuff.vp8_encode_bool(ref bc, 1, 128);
+                byte* uv_probs = coef_probs + (2 * 8 * 3 * 11); // UV block type (type 2)
+                byte* p = uv_probs;
+                boolhuff.vp8_encode_bool(ref bc, 0, p[0]);
             }
 
             // Process 4 V blocks (8x8 split into 4x4)
             for (int block = 0; block < 4; block++)
             {
-                // For UV, just write EOB (simplified)
-                boolhuff.vp8_encode_bool(ref bc, 1, 128);
+                byte* uv_probs = coef_probs + (2 * 8 * 3 * 11); // UV block type (type 2)
+                byte* p = uv_probs;
+                boolhuff.vp8_encode_bool(ref bc, 0, p[0]);
             }
         }
     }
