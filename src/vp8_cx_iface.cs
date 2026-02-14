@@ -240,21 +240,71 @@ namespace Vpx.Net
                 // MB skip coeff flag context (keyframe doesn't use this, but decoder reads it)
                 boolhuff.vp8_encode_bool(ref bc, 0, 128);  // No update
 
-                // Encode macroblocks
+                // Get coefficient probabilities (used for coefficient encoding phase)
+                byte* coef_probs = stackalloc byte[4 * 8 * 3 * 11];
+                fixed (byte* pDefaultProbs = default_coef_probs_c.default_coef_probs)
+                {
+                    for (int i = 0; i < 4 * 8 * 3 * 11; i++)
+                    {
+                        coef_probs[i] = pDefaultProbs[i];
+                    }
+                }
+
                 int mb_rows = ctx.common.mb_rows;
                 int mb_cols = ctx.common.mb_cols;
 
+                // PHASE 1: Encode ALL macroblock modes first
+                // The decoder reads all modes via vp8_decode_mode_mvs() before reading coefficients
                 for (int mb_row = 0; mb_row < mb_rows; mb_row++)
                 {
                     for (int mb_col = 0; mb_col < mb_cols; mb_col++)
                     {
-                        // Encode single macroblock (16x16)
-                        vp8e_encode_macroblock_keyframe(ctx, ref bc, img, mb_row, mb_col);
+                        // Encode Y mode using tree structure
+                        int intra_mode = (int)MB_PREDICTION_MODE.DC_PRED;
+                        fixed (byte* ymode_probs = vp8_entropymodedata.vp8_kf_ymode_prob)
+                        {
+                            vp8_treed_write(ref bc, entropymode.vp8_kf_ymode_tree, ymode_probs, intra_mode);
+                        }
+                        
+                        // Encode UV mode
+                        int uv_mode = (int)MB_PREDICTION_MODE.DC_PRED;
+                        fixed (byte* uvmode_probs = vp8_entropymodedata.vp8_kf_uv_mode_prob)
+                        {
+                            vp8_treed_write(ref bc, entropymode.vp8_uv_mode_tree, uvmode_probs, uv_mode);
+                        }
                     }
                 }
 
+                // Debug: Check position after mode encoding
+                uint pos_after_modes = bc.pos;
+
+                // PHASE 2: Encode ALL macroblock coefficients
+                // The decoder reads coefficients via decode_mb_rows() after reading all modes
+                for (int mb_row = 0; mb_row < mb_rows; mb_row++)
+                {
+                    for (int mb_col = 0; mb_col < mb_cols; mb_col++)
+                    {
+                        // Encode coefficient data for this macroblock
+                        vp8e_encode_macroblock_coeffs(ctx, ref bc, img, mb_row, mb_col, coef_probs);
+                    }
+                }
+
+                // Debug: Check position after coefficient encoding
+                uint pos_after_coeffs = bc.pos;
+
                 // Finish encoding
                 boolhuff.vp8_stop_encode(ref bc);
+
+                // Debug output
+                System.Console.WriteLine($"DEBUG: Modes={pos_after_modes} bytes, Coeffs={pos_after_coeffs-pos_after_modes} bytes, Total={bc.pos} bytes");
+                
+                // Debug: Print first 20 bytes after header
+                System.Console.Write("DEBUG: Encoded data: ");
+                for (int i = 0; i < System.Math.Min(20, (int)bc.pos); i++)
+                {
+                    System.Console.Write($"{output_ptr[header_pos + i]:X2} ");
+                }
+                System.Console.WriteLine();
 
                 // Calculate first partition size
                 uint first_partition_size = bc.pos;
@@ -542,6 +592,57 @@ namespace Vpx.Net
                     int NUM_PROBAS = 11;
                     int NUM_CTX = 3;
                     int bigSlice = NUM_CTX * NUM_PROBAS;
+                    byte* p = block_probs; // band 0, context 0
+                    
+                    // Write "no coefficients" (EOB at first position)
+                    boolhuff.vp8_encode_bool(ref bc, 0, p[0]);
+                }
+            }
+
+            // Process 4 U blocks (8x8 split into 4x4)  
+            for (int block = 0; block < 4; block++)
+            {
+                byte* uv_probs = coef_probs + (2 * 8 * 3 * 11); // UV block type (type 2)
+                byte* p = uv_probs;
+                boolhuff.vp8_encode_bool(ref bc, 0, p[0]);
+            }
+
+            // Process 4 V blocks (8x8 split into 4x4)
+            for (int block = 0; block < 4; block++)
+            {
+                byte* uv_probs = coef_probs + (2 * 8 * 3 * 11); // UV block type (type 2)
+                byte* p = uv_probs;
+                boolhuff.vp8_encode_bool(ref bc, 0, p[0]);
+            }
+        }
+
+        /// <summary>
+        /// Encode coefficient data only for a single macroblock (modes already encoded separately)
+        /// </summary>
+        private static void vp8e_encode_macroblock_coeffs(VP8E_COMP ctx, ref BOOL_CODER bc,
+            vpx_image_t img, int mb_row, int mb_col, byte* coef_probs)
+        {
+            // Get macroblock position in image
+            int mb_y = mb_row * 16;
+            int mb_x = mb_col * 16;
+
+            // Skip macroblocks outside image bounds
+            if (mb_y >= img.d_h || mb_x >= img.d_w)
+            {
+                return;
+            }
+
+            int NUM_PROBAS = 11;
+            int NUM_CTX = 3;
+            int bigSlice = NUM_CTX * NUM_PROBAS;
+
+            // Process 16 4x4 Y blocks
+            for (int block_y = 0; block_y < 4; block_y++)
+            {
+                for (int block_x = 0; block_x < 4; block_x++)
+                {
+                    // For now, encode all blocks as empty (EOB) to test basic structure
+                    byte* block_probs = coef_probs; // Y1 block type (type 0)
                     byte* p = block_probs; // band 0, context 0
                     
                     // Write "no coefficients" (EOB at first position)
