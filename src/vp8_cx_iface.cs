@@ -224,9 +224,6 @@ namespace Vpx.Net
         private static void vp8e_encode_macroblock_keyframe(VP8E_COMP ctx, ref BOOL_CODER bc,
             vpx_image_t img, int mb_row, int mb_col)
         {
-            // For keyframe, use simple DC prediction for all blocks
-            // This is a highly simplified implementation
-
             // Get macroblock position in image
             int mb_y = mb_row * 16;
             int mb_x = mb_col * 16;
@@ -237,24 +234,111 @@ namespace Vpx.Net
                 return;
             }
 
-            // Encode intra mode (simplified - use DC_PRED for all blocks)
-            // In full implementation, we'd choose best prediction mode
-            int intra_mode = 0;  // DC_PRED
+            // Allocate buffers for prediction and residual
+            byte* pred_buffer = stackalloc byte[256 + 64 + 64];  // 16x16 Y + 8x8 U + 8x8 V
+            short* residual = stackalloc short[256 + 64 + 64];
+            short* dct_coeffs = stackalloc short[16];
+
+            // Use DC prediction (simplest mode for keyframes)
+            // Encode intra mode - DC_PRED
+            int intra_mode = (int)MB_PREDICTION_MODE.DC_PRED;
             boolhuff.vp8_encode_value(ref bc, intra_mode, 4);
 
-            // Process 16 4x4 Y blocks + 4 U blocks + 4 V blocks
-            // For simplicity, just encode zeros (skip blocks)
-            // In full implementation, we would:
-            // 1. Compute residual (source - prediction)
-            // 2. Apply forward DCT
-            // 3. Quantize
-            // 4. Tokenize and encode
+            // Generate DC prediction for 16x16 Y macroblock
+            byte* y_pred = pred_buffer;
+            byte* u_pred = pred_buffer + 256;
+            byte* v_pred = pred_buffer + 256 + 64;
 
-            // For now, signal all blocks as empty (all coefficients zero)
-            for (int block = 0; block < 24; block++)
+            // Simple DC prediction: use 128 for all pixels (mid-gray)
+            // In full implementation, we'd use average of above/left pixels
+            for (int i = 0; i < 256; i++) y_pred[i] = 128;
+            for (int i = 0; i < 64; i++) u_pred[i] = 128;
+            for (int i = 0; i < 64; i++) v_pred[i] = 128;
+
+            // Get source pixels from image
+            byte* y_src = img.planes[0] + (mb_y * img.stride[0]) + mb_x;
+            byte* u_src = img.planes[1] + ((mb_y / 2) * img.stride[1]) + (mb_x / 2);
+            byte* v_src = img.planes[2] + ((mb_y / 2) * img.stride[2]) + (mb_x / 2);
+
+            // Process 16 4x4 Y blocks
+            for (int block_y = 0; block_y < 4; block_y++)
             {
-                // Write EOB token (empty block)
-                boolhuff.vp8_encode_bool(ref bc, 1, 128);  // EOB
+                for (int block_x = 0; block_x < 4; block_x++)
+                {
+                    int block_idx = block_y * 4 + block_x;
+                    int pixel_y = block_y * 4;
+                    int pixel_x = block_x * 4;
+
+                    // Compute residuals for 4x4 block
+                    short* block_residual = residual + (block_idx * 16);
+                    for (int y = 0; y < 4; y++)
+                    {
+                        for (int x = 0; x < 4; x++)
+                        {
+                            int src_offset = (pixel_y + y) * img.stride[0] + (pixel_x + x);
+                            int pred_offset = (pixel_y + y) * 16 + (pixel_x + x);
+                            block_residual[y * 4 + x] = (short)(y_src[src_offset] - y_pred[pred_offset]);
+                        }
+                    }
+
+                    // Apply forward DCT
+                    fdctllm.vp8_short_fdct4x4_c(block_residual, dct_coeffs, 4);
+
+                    // Simple quantization (divide by quantizer)
+                    int qindex = ctx.common.base_qindex;
+                    int quantizer = quant_common.vp8_ac_yquant(qindex);
+                    for (int i = 0; i < 16; i++)
+                    {
+                        dct_coeffs[i] = (short)((dct_coeffs[i] * 4) / quantizer);
+                    }
+
+                    // Encode coefficients (simplified - just check if all zero)
+                    bool all_zero = true;
+                    for (int i = 0; i < 16; i++)
+                    {
+                        if (dct_coeffs[i] != 0)
+                        {
+                            all_zero = false;
+                            break;
+                        }
+                    }
+
+                    if (all_zero)
+                    {
+                        // Write EOB immediately
+                        boolhuff.vp8_encode_bool(ref bc, 1, 128);
+                    }
+                    else
+                    {
+                        // Write some coefficients (simplified encoding)
+                        // Just write a few non-zero tokens
+                        for (int i = 0; i < 16; i++)
+                        {
+                            if (dct_coeffs[i] != 0)
+                            {
+                                // Encode non-zero coefficient
+                                boolhuff.vp8_encode_bool(ref bc, 0, 128);  // Not EOB
+                                boolhuff.vp8_encode_value(ref bc, System.Math.Abs(dct_coeffs[i]), 8);
+                            }
+                        }
+                        // Write EOB
+                        boolhuff.vp8_encode_bool(ref bc, 1, 128);
+                    }
+                }
+            }
+
+            // Process 4 U blocks (8x8 split into 4x4)
+            for (int block = 0; block < 4; block++)
+            {
+                // For UV, just write EOB (simplified)
+                boolhuff.vp8_encode_bool(ref bc, 1, 128);
+            }
+
+            // Process 4 V blocks (8x8 split into 4x4)
+            for (int block = 0; block < 4; block++)
+            {
+                // For UV, just write EOB (simplified)
+                boolhuff.vp8_encode_bool(ref bc, 1, 128);
             }
         }
     }
