@@ -107,23 +107,105 @@ namespace Vpx.Net.UnitTest
 
             logger.LogDebug($"Encoded {width}x{height} frame to {encoded.Length} bytes");
 
-            // Try to decode the encoded frame
-            try
-            {
-                var decoded = codec.DecodeVideo(encoded, VideoPixelFormatsEnum.Bgr, VideoCodecsEnum.VP8).ToList();
+            // Decode the encoded frame
+            var decoded = codec.DecodeVideo(encoded, VideoPixelFormatsEnum.Bgr, VideoCodecsEnum.VP8).ToList();
 
-                Assert.NotEmpty(decoded);
-                Assert.Equal(width, (int)decoded[0].Width);
-                Assert.Equal(height, (int)decoded[0].Height);
+            Assert.NotEmpty(decoded);
+            Assert.Equal(width, (int)decoded[0].Width);
+            Assert.Equal(height, (int)decoded[0].Height);
+            Assert.NotNull(decoded[0].Sample);
+            Assert.True(decoded[0].Sample.Length > 0);
 
-                logger.LogDebug($"Successfully decoded frame: {decoded[0].Width}x{decoded[0].Height}");
-            }
-            catch (Exception ex)
+            logger.LogDebug($"Successfully decoded frame: {decoded[0].Width}x{decoded[0].Height}, {decoded[0].Sample.Length} bytes");
+        }
+
+        /// <summary>
+        /// Test encoding with actual image verification
+        /// </summary>
+        [Fact]
+        public void EncodeAndVerifyImageQuality()
+        {
+            logger.LogDebug("---EncodeAndVerifyImageQuality---");
+
+            int width = 32;
+            int height = 32;
+
+            // Create a test pattern with blocks of different colors
+            int ySize = width * height;
+            int uvSize = ySize / 4;
+            byte[] i420Frame = new byte[ySize + uvSize + uvSize];
+
+            // Create a checkerboard-like pattern in Y plane
+            for (int y = 0; y < height; y++)
             {
-                logger.LogWarning($"Decoding failed (expected for initial implementation): {ex.Message}");
-                // For now, decoding our own encoded frames may not work perfectly
-                // This is expected in early implementation stages
+                for (int x = 0; x < width; x++)
+                {
+                    bool isDark = ((x / 8) + (y / 8)) % 2 == 0;
+                    i420Frame[y * width + x] = isDark ? (byte)64 : (byte)192;
+                }
             }
+
+            // Fill U and V with mid-gray
+            Array.Fill<byte>(i420Frame, 128, ySize, uvSize);
+            Array.Fill<byte>(i420Frame, 128, ySize + uvSize, uvSize);
+
+            VP8Codec codec = new VP8Codec();
+            codec.ForceKeyFrame();
+
+            // Encode the frame
+            var encoded = codec.EncodeVideo(width, height, i420Frame, VideoPixelFormatsEnum.I420, VideoCodecsEnum.VP8);
+
+            Assert.NotNull(encoded);
+            Assert.True(encoded.Length > 50, "Encoded size should be reasonable");
+
+            logger.LogDebug($"Encoded checkerboard {width}x{height} frame to {encoded.Length} bytes");
+
+            // Decode and verify (decoder outputs BGR format)
+            var decoded = codec.DecodeVideo(encoded, VideoPixelFormatsEnum.Bgr, VideoCodecsEnum.VP8).ToList();
+
+            Assert.NotEmpty(decoded);
+            Assert.Equal(width, (int)decoded[0].Width);
+            Assert.Equal(height, (int)decoded[0].Height);
+
+            // Check that decoded BGR data has the right size (3 bytes per pixel)
+            int expectedSize = width * height * 3;
+            Assert.Equal(expectedSize, decoded[0].Sample.Length);
+
+            // Verify that the pattern is somewhat preserved (allowing for lossy compression)
+            byte[] decodedBgr = decoded[0].Sample;
+            int matchingPixels = 0;
+            int totalPixels = width * height;
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    // Get original Y value
+                    byte originalY = i420Frame[y * width + x];
+                    
+                    // Get decoded RGB values (BGR format, so R=2, G=1, B=0)
+                    int pixelOffset = (y * width + x) * 3;
+                    byte b = decodedBgr[pixelOffset];
+                    byte g = decodedBgr[pixelOffset + 1];
+                    byte r = decodedBgr[pixelOffset + 2];
+                    
+                    // Convert RGB to approximate Y (luma)
+                    byte decodedY = (byte)((r * 0.299 + g * 0.587 + b * 0.114));
+                    
+                    // Allow some difference due to lossy compression and color space conversion
+                    if (Math.Abs(originalY - decodedY) < 40)
+                    {
+                        matchingPixels++;
+                    }
+                }
+            }
+
+            double matchPercentage = (matchingPixels * 100.0) / totalPixels;
+            logger.LogDebug($"Pixel match rate: {matchPercentage:F1}% ({matchingPixels}/{totalPixels})");
+
+            // Require at least 60% of pixels to be reasonably close to original
+            // (lossy compression + color space conversion reduces accuracy)
+            Assert.True(matchPercentage > 60, $"Expected >60% pixel match, got {matchPercentage:F1}%");
         }
 
         /// <summary>

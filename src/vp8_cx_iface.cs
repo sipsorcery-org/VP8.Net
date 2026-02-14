@@ -134,16 +134,111 @@ namespace Vpx.Net
 
             // Allocate output buffer
             byte[] output = new byte[ctx.compressed_buffer.Length];
-            int output_pos = 0;
 
             fixed (byte* output_ptr = output)
             {
-                // Initialize boolean encoder
-                BOOL_CODER bc = new BOOL_CODER();
-                boolhuff.vp8_start_encode(ref bc, output_ptr + 10, output_ptr + output.Length);
+                // Write uncompressed frame header first (10 bytes for keyframe)
+                int header_pos = 0;
+                
+                // Frame tag: 3 bytes (includes first partition size, will be filled at end)
+                uint frame_tag = 0;
+                frame_tag |= 0;  // P=0 for keyframe
+                frame_tag |= (0 << 1);  // version = 0
+                frame_tag |= (1 << 4);  // show_frame = 1
+                // Bits 5-23 will be first partition size (set later)
+                output_ptr[header_pos++] = (byte)(frame_tag & 0xFF);
+                output_ptr[header_pos++] = (byte)((frame_tag >> 8) & 0xFF);
+                output_ptr[header_pos++] = (byte)((frame_tag >> 16) & 0xFF);
 
-                // Write frame header (simplified)
-                vp8e_write_frame_header(ctx, output_ptr, ref output_pos, true);
+                // Start code: 0x9D 0x01 0x2A
+                output_ptr[header_pos++] = 0x9D;
+                output_ptr[header_pos++] = 0x01;
+                output_ptr[header_pos++] = 0x2A;
+
+                // Width and height (14 bits each, with 2 bits scale)
+                uint width = (uint)ctx.common.Width;
+                uint height = (uint)ctx.common.Height;
+                output_ptr[header_pos++] = (byte)(width & 0xFF);
+                output_ptr[header_pos++] = (byte)((width >> 8) & 0x3F);  // Upper 6 bits of width, lower 2 bits are scale
+                output_ptr[header_pos++] = (byte)(height & 0xFF);
+                output_ptr[header_pos++] = (byte)((height >> 8) & 0x3F);  // Upper 6 bits of height, lower 2 bits are scale
+
+                // Initialize boolean encoder for compressed data
+                BOOL_CODER bc = new BOOL_CODER();
+                boolhuff.vp8_start_encode(ref bc, output_ptr + header_pos, output_ptr + output.Length);
+
+                // Write compressed frame header
+                // Colorspace (1 bit) - 0 for normal colorspace
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);
+                
+                // Clamping type (1 bit) - 0 for no clamping
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);
+
+                // Segmentation enabled (1 bit) - 0 for disabled
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);
+
+                // Filter type (1 bit) - 0 for normal filter
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);
+
+                // Loop filter level (6 bits) - 0 for no loop filter
+                boolhuff.vp8_encode_value(ref bc, 0, 6);
+
+                // Sharpness level (3 bits) - 0
+                boolhuff.vp8_encode_value(ref bc, 0, 3);
+
+                // MB loop filter adjustments enabled (1 bit) - 0 for disabled
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);
+
+                // log2_nbr_of_dct_partitions (2 bits) - 0 for 1 partition
+                boolhuff.vp8_encode_value(ref bc, 0, 2);
+
+                // Base Q index (7 bits)
+                int qindex = ctx.common.base_qindex;
+                boolhuff.vp8_encode_value(ref bc, qindex, 7);
+
+                // Y1 DC delta Q (1 bit update flag + 4 bits + 1 sign bit if updated)
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);  // No delta
+
+                // Y2 DC delta Q
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);  // No delta
+
+                // Y2 AC delta Q
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);  // No delta
+
+                // UV DC delta Q
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);  // No delta
+
+                // UV AC delta Q
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);  // No delta
+
+                // Refresh entropy probs (1 bit) - 0 for keyframe
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);
+
+                // refresh_last_frame (always 1 for keyframes, read anyway for non-keyframes)
+                // For keyframes this is implicit, but let's write it anyway
+                boolhuff.vp8_encode_bool(ref bc, 1, 128);
+
+                // Coefficient probability updates
+                // For each coefficient position, write whether it's being updated
+                // Use the update probabilities from coefupdateprobs
+                for (int i = 0; i < 4; i++)      // Block types
+                {
+                    for (int j = 0; j < 8; j++)  // Bands
+                    {
+                        for (int k = 0; k < 3; k++)  // Contexts
+                        {
+                            for (int l = 0; l < 11; l++)  // Tokens
+                            {
+                                // Write 0 using the update probability to indicate no update
+                                byte update_prob = coefupdateprobs.vp8_coef_update_probs[i, j, k, l];
+                                boolhuff.vp8_encode_bool(ref bc, 0, update_prob);
+                            }
+                        }
+                    }
+                }
+
+                // MB skip coeff flag context (keyframe doesn't use this, but decoder reads it)
+                boolhuff.vp8_encode_bool(ref bc, 0, 128);  // No update
 
                 // Encode macroblocks
                 int mb_rows = ctx.common.mb_rows;
@@ -161,8 +256,17 @@ namespace Vpx.Net
                 // Finish encoding
                 boolhuff.vp8_stop_encode(ref bc);
 
-                // Calculate actual compressed size
-                compressed_size = (uint)bc.pos + 10;  // Header + encoded data
+                // Calculate first partition size
+                uint first_partition_size = bc.pos;
+
+                // Write first partition size into frame tag (bits 5-23, 19 bits)
+                uint size_in_frame_tag = first_partition_size << 5;
+                output_ptr[0] |= (byte)((size_in_frame_tag) & 0xFF);
+                output_ptr[1] = (byte)((size_in_frame_tag >> 8) & 0xFF);
+                output_ptr[2] = (byte)((size_in_frame_tag >> 16) & 0xFF);
+
+                // Calculate total compressed size
+                compressed_size = (uint)(header_pos + bc.pos);
                 compressed = new byte[compressed_size];
                 Array.Copy(output, compressed, compressed_size);
 
@@ -173,48 +277,6 @@ namespace Vpx.Net
                 }
 
                 return vpx_codec_err_t.VPX_CODEC_OK;
-            }
-        }
-
-        /// <summary>
-        /// Write VP8 frame header
-        /// </summary>
-        private static void vp8e_write_frame_header(VP8E_COMP ctx, byte* output, 
-            ref int pos, bool is_keyframe)
-        {
-            // VP8 uncompressed data chunk (10 bytes for keyframe)
-            if (is_keyframe)
-            {
-                // Frame tag: 3 bytes
-                uint frame_tag = 0;
-                frame_tag |= 0;  // P=0 for keyframe
-                frame_tag |= (0 << 1);  // version = 0
-                frame_tag |= (1 << 4);  // show_frame = 1
-                // First partition size will be filled later
-                output[pos++] = (byte)(frame_tag & 0xFF);
-                output[pos++] = (byte)((frame_tag >> 8) & 0xFF);
-                output[pos++] = (byte)((frame_tag >> 16) & 0xFF);
-
-                // Start code: 0x9D 0x01 0x2A
-                output[pos++] = 0x9D;
-                output[pos++] = 0x01;
-                output[pos++] = 0x2A;
-
-                // Width and height (16 bits each)
-                uint width = (uint)ctx.common.Width;
-                uint height = (uint)ctx.common.Height;
-                output[pos++] = (byte)(width & 0xFF);
-                output[pos++] = (byte)((width >> 8) & 0xFF);
-                output[pos++] = (byte)(height & 0xFF);
-                output[pos++] = (byte)((height >> 8) & 0xFF);
-            }
-            else
-            {
-                // P-frame header (3 bytes)
-                uint frame_tag = 1;  // P=1 for inter frame
-                output[pos++] = (byte)(frame_tag & 0xFF);
-                output[pos++] = (byte)((frame_tag >> 8) & 0xFF);
-                output[pos++] = (byte)((frame_tag >> 16) & 0xFF);
             }
         }
 
