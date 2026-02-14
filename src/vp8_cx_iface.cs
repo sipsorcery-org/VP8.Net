@@ -102,6 +102,9 @@ namespace Vpx.Net
             {
                 bool is_keyframe = ctx.force_next_keyframe || (ctx.frame_count == 0);
                 
+                // For now, always encode as keyframe (inter-frame support not implemented yet)
+                is_keyframe = true;
+                
                 if (is_keyframe)
                 {
                     // Encode as keyframe
