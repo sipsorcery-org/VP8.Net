@@ -69,18 +69,39 @@ namespace Vpx.Net
                 // Convert input to I420 format if needed
                 byte[] i420Buffer = PixelConverter.ToI420(width, height, sample, pixelFormat);
 
-                // Create vpx_image_t from I420 buffer
-                vpx_image_t img = CreateImageFromI420(i420Buffer, width, height);
-
-                // Encode the frame
+                // Encode the frame with pinned buffer
                 byte[] encodedBuffer;
                 uint encodedSize;
-                var result = vp8_cx_iface.vp8e_encode_frame(_vp8Encoder, img, out encodedBuffer, out encodedSize);
-
-                if (result != vpx_codec_err_t.VPX_CODEC_OK)
+                
+                fixed (byte* pBuffer = i420Buffer)
                 {
-                    logger.LogWarning($"VP8 encode failed with result: {result}");
-                    return null;
+                    // Create vpx_image_t with pinned buffer pointers
+                    vpx_image_t img = new vpx_image_t();
+                    img.fmt = vpx_img_fmt_t.VPX_IMG_FMT_I420;
+                    img.d_w = (uint)width;
+                    img.d_h = (uint)height;
+                    img.w = (uint)width;
+                    img.h = (uint)height;
+                    
+                    int y_size = width * height;
+                    int uv_size = y_size / 4;
+
+                    img.planes[0] = pBuffer;
+                    img.planes[1] = pBuffer + y_size;
+                    img.planes[2] = pBuffer + y_size + uv_size;
+
+                    img.stride[0] = width;
+                    img.stride[1] = width / 2;
+                    img.stride[2] = width / 2;
+
+                    // Encode while buffer is pinned
+                    var result = vp8_cx_iface.vp8e_encode_frame(_vp8Encoder, img, out encodedBuffer, out encodedSize);
+
+                    if (result != vpx_codec_err_t.VPX_CODEC_OK)
+                    {
+                        logger.LogWarning($"VP8 encode failed with result: {result}");
+                        return null;
+                    }
                 }
 
                 if (_forceKeyFrame)
@@ -90,32 +111,6 @@ namespace Vpx.Net
 
                 return encodedBuffer;
             }
-        }
-
-        private unsafe vpx_image_t CreateImageFromI420(byte[] i420Buffer, int width, int height)
-        {
-            vpx_image_t img = new vpx_image_t();
-            img.fmt = vpx_img_fmt_t.VPX_IMG_FMT_I420;
-            img.d_w = (uint)width;
-            img.d_h = (uint)height;
-            img.w = (uint)width;
-            img.h = (uint)height;
-
-            fixed (byte* pBuffer = i420Buffer)
-            {
-                int y_size = width * height;
-                int uv_size = y_size / 4;
-
-                img.planes[0] = pBuffer;
-                img.planes[1] = pBuffer + y_size;
-                img.planes[2] = pBuffer + y_size + uv_size;
-
-                img.stride[0] = width;
-                img.stride[1] = width / 2;
-                img.stride[2] = width / 2;
-            }
-
-            return img;
         }
 
         public unsafe IEnumerable<VideoSample> DecodeVideo(byte[] frame, VideoPixelFormatsEnum pixelFormat, VideoCodecsEnum codec)
