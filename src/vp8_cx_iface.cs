@@ -275,9 +275,6 @@ namespace Vpx.Net
                     }
                 }
 
-                // Debug: Check position after mode encoding
-                uint pos_after_modes = bc.pos;
-
                 // PHASE 2: Encode ALL macroblock coefficients
                 // The decoder reads coefficients via decode_mb_rows() after reading all modes
                 for (int mb_row = 0; mb_row < mb_rows; mb_row++)
@@ -289,22 +286,8 @@ namespace Vpx.Net
                     }
                 }
 
-                // Debug: Check position after coefficient encoding
-                uint pos_after_coeffs = bc.pos;
-
                 // Finish encoding
                 boolhuff.vp8_stop_encode(ref bc);
-
-                // Debug output
-                System.Console.WriteLine($"DEBUG: Modes={pos_after_modes} bytes, Coeffs={pos_after_coeffs-pos_after_modes} bytes, Total={bc.pos} bytes");
-                
-                // Debug: Print first 20 bytes after header
-                System.Console.Write("DEBUG: Encoded data: ");
-                for (int i = 0; i < System.Math.Min(20, (int)bc.pos); i++)
-                {
-                    System.Console.Write($"{output_ptr[header_pos + i]:X2} ");
-                }
-                System.Console.WriteLine();
 
                 // Calculate first partition size
                 uint first_partition_size = bc.pos;
