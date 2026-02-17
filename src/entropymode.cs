@@ -79,6 +79,12 @@ namespace Vpx.Net
         public static readonly vp8_tree_index[] vp8_small_mvtree = { 2,  8,  4,  6,  -0, -1, -2,
                                               -3, 10, 12, -4, -5, -6, -7 };
 
+        public static readonly vp8_token[] vp8_small_mvencodings = new vp8_token[8]
+        {
+            new vp8_token(0, 3), new vp8_token(1, 3), new vp8_token(2, 3), new vp8_token(3, 3),
+            new vp8_token(4, 3), new vp8_token(5, 3), new vp8_token(6, 3), new vp8_token(7, 3)
+        };
+
         public static readonly vp8_tree_index[] vp8_bmode_tree = /* INTRAMODECONTEXTNODE value */
             {
               -1 * (int)B_PREDICTION_MODE.B_DC_PRED, 2,          /* 0 = DC_NODE */

@@ -229,5 +229,56 @@ namespace Vpx.Net
 
         public static void vp8_write_bit(ref vp8_writer w, int bit)
             => vp8_write(ref w, bit, vp8_prob_half);
+
+        private unsafe static void branch_counts(int n, vp8_token[] tok, vp8_tree[] tree,
+                                                 uint[,] branch_ct, uint[] num_events)
+        {
+            int t = 0;
+            do
+            {
+                int L = tok[t].Len;
+                int x = tok[t].value;
+                uint ct = num_events[t];
+
+                vp8_tree_index i = 0;
+
+                do
+                {
+                    int b = (x >> --L) & 1;
+                    branch_ct[i >> 1, b] += ct;
+                    i = tree[i + b];
+                } while (i > 0);
+
+            } while (++t < n);
+        }
+
+        public unsafe static void vp8_tree_probs_from_distribution(int n, vp8_token[] tok,
+                                                                    vp8_tree[] tree, vp8_prob[] probs,
+                                                                    uint[,] branch_ct, uint[] num_events,
+                                                                    uint Pfactor, int Round)
+        {
+            int tree_len = n - 1;
+            int t = 0;
+
+            branch_counts(n, tok, tree, branch_ct, num_events);
+
+            do
+            {
+                uint c0 = branch_ct[t, 0];
+                uint c1 = branch_ct[t, 1];
+                ulong tot = c0 + c1;
+
+                if (tot != 0)
+                {
+                    ulong p = ((ulong)c0 * Pfactor) + (Round != 0 ? tot >> 1 : 0);
+                    p = p / tot;
+                    probs[t] = (vp8_prob)(p < 256 ? (p != 0 ? p : 1) : 255);
+                }
+                else
+                {
+                    probs[t] = vp8_prob_half;
+                }
+            } while (++t < tree_len);
+        }
     }
 }
