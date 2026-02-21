@@ -1,3 +1,7 @@
+# Repository Moved as of 21 Feb 2026
+
+The repository has now been absorbed into the main [SIPSorcery](https://github.com/sipsorcery-org/sipsorcery) repository. Any iusses or pull requests should be raised there.
+
 # VP8.Net
 
 This project is an attempt to port the [WebM](https://www.webmproject.org/) VP8 video codec to C#.
