@@ -36,6 +36,7 @@ namespace Vpx.Net
         }
 
         //private Vp8Codec _vp8Encoder;
+        private VP8Encoder _vp8Encoder;
         private vpx_codec_ctx_t _vp8Decoder;
         private bool _forceKeyFrame = false;
         private Object _decoderLock = new object();
@@ -52,26 +53,24 @@ namespace Vpx.Net
 
         public byte[] EncodeVideo(int width, int height, byte[] sample, VideoPixelFormatsEnum pixelFormat, VideoCodecsEnum codec)
         {
-            //lock (_encoderLock)
-            //{
-            //    if (_vp8Encoder == null)
-            //    {
-            //        _vp8Encoder = new Vp8Codec();
-            //        _vp8Encoder.InitialiseEncoder((uint)width, (uint)height);
-            //    }
+            lock (_encoderLock)
+            {
+                if (_vp8Encoder == null)
+                {
+                    _vp8Encoder = new VP8Encoder(width, height);
+                    _vp8Encoder.SetQuantizer(10);  // Default quality
+                }
 
-            //    var i420Buffer = PixelConverter.ToI420(width, height, sample, pixelFormat);
-            //    var encodedBuffer = _vp8Encoder.Encode(i420Buffer, _forceKeyFrame);
+                var i420Buffer = PixelConverter.ToI420(width, height, sample, pixelFormat);
+                var encodedBuffer = _vp8Encoder.EncodeFrame(i420Buffer, _forceKeyFrame);
 
-            //    if (_forceKeyFrame)
-            //    {
-            //        _forceKeyFrame = false;
-            //    }
+                if (_forceKeyFrame)
+                {
+                    _forceKeyFrame = false;
+                }
 
-            //    return encodedBuffer;
-            //}
-
-            throw new NotImplementedException("TODO: The encoder has not yet been ported.");
+                return encodedBuffer;
+            }
         }
 
         public unsafe IEnumerable<VideoSample> DecodeVideo(byte[] frame, VideoPixelFormatsEnum pixelFormat, VideoCodecsEnum codec)

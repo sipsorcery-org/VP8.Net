@@ -17,6 +17,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using vpx_codec_flags_t = System.Int64;
 
 namespace Vpx.Net
 {
@@ -558,5 +559,7 @@ namespace Vpx.Net
 
     public class vpx_encoder
     {
+        // Encoder functions are partially implemented
+        // Additional development work needed for full VP8 encoding
     }
 }

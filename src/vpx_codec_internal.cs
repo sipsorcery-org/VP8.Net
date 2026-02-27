@@ -395,6 +395,9 @@ namespace Vpx.Net
         public vpx_codec_ctrl_fn_map_t[] ctrl_maps;   /**< \copydoc ::vpx_codec_ctrl_fn_map_t */
         public vpx_codec_dec_iface_t dec;
         public vpx_codec_enc_iface_t enc;
+        
+        // Encoder function (simplified)
+        public Func<vpx_codec_ctx_t, vpx_image_t, long, uint, uint, vpx_codec_err_t> encode;
     }
 
     public struct vpx_codec_dec_iface_t
