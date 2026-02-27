@@ -33,5 +33,11 @@ namespace Vpx.Net
         {
             ctx.cpu_caps = 0;
         }
+
+        public static void vpx_clear_system_state()
+        {
+            // On x86 platforms this would call emms instruction to clear MMX state
+            // Not needed in managed C# code
+        }
     }
 }

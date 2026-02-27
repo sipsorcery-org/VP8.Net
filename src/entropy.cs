@@ -61,6 +61,11 @@ namespace Vpx.Net
         //const int vp8_mb_feature_data_bits[MB_LVL_MAX] = { 7, 6 };
         public static readonly int[] vp8_mb_feature_data_bits = { 7, 6 };
 
+        public static readonly int[] vp8_default_zig_zag1d = new int[16]
+        {
+            0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15
+        };
+
         public static void vp8_default_coef_probs(VP8_COMMON pc)
         {
             //memcpy(pc->fc.coef_probs, default_coef_probs, sizeof(default_coef_probs));

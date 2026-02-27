@@ -556,7 +556,15 @@ namespace Vpx.Net
         public int temporal_layering_mode;
     }
 
-    public class vpx_encoder
+    public enum vp8e_tuning
     {
+        VP8_TUNE_PSNR,
+        VP8_TUNE_SSIM
+    }
+
+    public static class vpx_encoder
+    {
+        public const int VPX_TS_MAX_PERIODICITY = 16;
+        public const int VPX_TS_MAX_LAYERS = 5;
     }
 }
