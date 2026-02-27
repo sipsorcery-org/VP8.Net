@@ -35,7 +35,7 @@ namespace Vpx.Net
             get { return _supportedFormats; }
         }
 
-        //private Vp8Codec _vp8Encoder;
+        private VP8E_COMP _vp8Encoder;
         private vpx_codec_ctx_t _vp8Decoder;
         private bool _forceKeyFrame = false;
         private Object _decoderLock = new object();
@@ -50,28 +50,67 @@ namespace Vpx.Net
         public void ForceKeyFrame() => _forceKeyFrame = true;
         public bool IsSupported(VideoCodecsEnum codec) => codec == VideoCodecsEnum.VP8;
 
-        public byte[] EncodeVideo(int width, int height, byte[] sample, VideoPixelFormatsEnum pixelFormat, VideoCodecsEnum codec)
+        public unsafe byte[] EncodeVideo(int width, int height, byte[] sample, VideoPixelFormatsEnum pixelFormat, VideoCodecsEnum codec)
         {
-            //lock (_encoderLock)
-            //{
-            //    if (_vp8Encoder == null)
-            //    {
-            //        _vp8Encoder = new Vp8Codec();
-            //        _vp8Encoder.InitialiseEncoder((uint)width, (uint)height);
-            //    }
+            lock (_encoderLock)
+            {
+                if (_vp8Encoder == null)
+                {
+                    _vp8Encoder = new VP8E_COMP();
+                    vp8_cx_iface.vp8e_init(_vp8Encoder, (uint)width, (uint)height);
+                }
 
-            //    var i420Buffer = PixelConverter.ToI420(width, height, sample, pixelFormat);
-            //    var encodedBuffer = _vp8Encoder.Encode(i420Buffer, _forceKeyFrame);
+                // Set keyframe flag if requested
+                if (_forceKeyFrame)
+                {
+                    _vp8Encoder.force_next_keyframe = true;
+                }
 
-            //    if (_forceKeyFrame)
-            //    {
-            //        _forceKeyFrame = false;
-            //    }
+                // Convert input to I420 format if needed
+                byte[] i420Buffer = PixelConverter.ToI420(width, height, sample, pixelFormat);
 
-            //    return encodedBuffer;
-            //}
+                // Encode the frame with pinned buffer
+                byte[] encodedBuffer;
+                uint encodedSize;
+                
+                fixed (byte* pBuffer = i420Buffer)
+                {
+                    // Create vpx_image_t with pinned buffer pointers
+                    vpx_image_t img = new vpx_image_t();
+                    img.fmt = vpx_img_fmt_t.VPX_IMG_FMT_I420;
+                    img.d_w = (uint)width;
+                    img.d_h = (uint)height;
+                    img.w = (uint)width;
+                    img.h = (uint)height;
+                    
+                    int y_size = width * height;
+                    int uv_size = y_size / 4;
 
-            throw new NotImplementedException("TODO: The encoder has not yet been ported.");
+                    img.planes[0] = pBuffer;
+                    img.planes[1] = pBuffer + y_size;
+                    img.planes[2] = pBuffer + y_size + uv_size;
+
+                    img.stride[0] = width;
+                    img.stride[1] = width / 2;
+                    img.stride[2] = width / 2;
+
+                    // Encode while buffer is pinned
+                    var result = vp8_cx_iface.vp8e_encode_frame(_vp8Encoder, img, out encodedBuffer, out encodedSize);
+
+                    if (result != vpx_codec_err_t.VPX_CODEC_OK)
+                    {
+                        logger.LogWarning($"VP8 encode failed with result: {result}");
+                        return null;
+                    }
+                }
+
+                if (_forceKeyFrame)
+                {
+                    _forceKeyFrame = false;
+                }
+
+                return encodedBuffer;
+            }
         }
 
         public unsafe IEnumerable<VideoSample> DecodeVideo(byte[] frame, VideoPixelFormatsEnum pixelFormat, VideoCodecsEnum codec)
